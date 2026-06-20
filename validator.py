@@ -1,45 +1,57 @@
 #!/usr/bin/env python3
 """
-Sexy_Proxy :: Auto Proxy Validator
-==================================
+Sexy_Proxy :: Auto Proxy Validator + Ranking Engine
+===================================================
 
-Deep, asynchronous proxy validator.
+A staged, highly-parallel proxy validator built to chew through very large
+aggregated proxy pools (hundreds of thousands of candidates) and emit a
+ranked set of real, working, fastest proxies.
 
-For every candidate proxy it will:
-  1. Detect the working protocol (http / socks4 / socks5).
-  2. Verify it actually proxies traffic (real request through it, twice, to
-     filter out flaky/honeypot proxies).
-  3. Measure latency (ms) and keep the fastest.
-  4. Test HTTPS-tunneling capability (TLS through the proxy).
-  5. Determine anonymity level (transparent / anonymous / elite) by comparing
-     the runner's real public IP and inspecting forwarding headers.
-  6. Resolve geo info (country / countryCode) via ip-api.
+PIPELINE (designed for parallel GitHub Actions jobs)
+----------------------------------------------------
+  1. prepare   -> fetch every source + local lists, de-duplicate, tag each
+                  proxy with its source protocol. Writes candidates.jsonl.
+  2. validate  -> validate ONE shard of candidates.jsonl in parallel with the
+                  other shards. Writes a partial JSON of working proxies.
+  3. merge     -> combine all partials, de-duplicate (keep fastest), update the
+                  rolling history (uptime / success-rate), RANK everything,
+                  and write the final results/ files.
 
-Results are written to ./results as both .txt (one proxy per line, fastest
-first) and .json (full detail), split per protocol plus a combined "best" list.
+Run a single shard locally / all-in-one:
+  python validator.py                         # prepare+validate+merge inline
+  python validator.py --loop 600              # repeat every 10 minutes
 
-Usage:
-    python validator.py                       # one full pass
-    python validator.py --loop 30             # re-validate every 30 seconds
-    python validator.py --concurrency 400 --timeout 8
+Staged (what the workflow uses):
+  python validator.py prepare  --out candidates.jsonl
+  python validator.py validate --candidates candidates.jsonl --shard 0:16 --out partials/0.json
+  python validator.py merge    --partials "partials/*.json"
 
-Inputs (auto-discovered, merged + de-duplicated):
-    - any *.txt under ./lists/
-    - proxies.txt in repo root (optional)
-    - every URL listed in sources.txt (remote raw proxy lists)
+DEEP VALIDATION (per proxy)
+---------------------------
+  * protocol confirmed (http / socks4 / socks5), tag-driven => 1 attempt
+  * real request through it TWICE (filters flaky / honeypot proxies)
+  * latency measured (ms)
+  * HTTPS-tunnel capability tested
+  * anonymity classified (transparent / anonymous / elite)
+  * geo resolved (country / country code / exit IP)
 
-Lines may be:  ip:port  |  proto://ip:port  |  user:pass@ip:port
+RANKING ENGINE
+--------------
+  score = 45% speed + 40% uptime + 10% https + 5% elite-anonymity
+  uptime / success-rate come from results/history.json (rolling, across runs).
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import glob as globmod
 import json
 import os
 import re
 import sys
 import time
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -47,73 +59,90 @@ import aiohttp
 from aiohttp_socks import ProxyConnector
 
 # --------------------------------------------------------------------------- #
-# Config / constants
+# Paths / constants
 # --------------------------------------------------------------------------- #
 
 ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT / "results"
 LISTS_DIR = ROOT / "lists"
-SOURCES_FILE = ROOT / "sources.txt"
-LOCAL_PROXIES = ROOT / "proxies.txt"
+SOURCES_JSON = ROOT / "sources.json"
+SOURCES_TXT = ROOT / "sources.txt"            # optional, untagged extras
+LOCAL_PROXIES = ROOT / "proxies.txt"          # optional
+HISTORY_FILE = RESULTS_DIR / "history.json"
 
 PROTOCOLS = ("http", "socks4", "socks5")
 
-# Judge endpoints.
-#   GEO_JUDGE  -> plaintext/json that echoes our IP + geo  (primary liveness)
-#   HDR_JUDGE  -> echoes request headers (anonymity detection)
-#   TLS_JUDGE  -> https endpoint (https-tunnel capability)
 GEO_JUDGE = "http://ip-api.com/json/?fields=status,country,countryCode,query"
 HDR_JUDGE = "http://httpbin.org/get"
 TLS_JUDGE = "https://api.ipify.org?format=json"
 REAL_IP_URLS = ("https://api.ipify.org?format=json", "https://ifconfig.me/all.json")
 
-PROXY_RE = re.compile(
-    r"^(?:(?P<proto>https?|socks4a?|socks5)://)?"
-    r"(?:(?P<auth>[^@\s/]+)@)?"
-    r"(?P<host>[A-Za-z0-9._-]+):(?P<port>\d{2,5})/?$"
-)
+# Ranking weights
+W_SPEED, W_UPTIME, W_HTTPS, W_ELITE = 0.45, 0.40, 0.10, 0.05
+EMA_ALPHA = 0.3
+PRUNE_AFTER_RUNS = 50      # drop history entries not seen in this many runs
 
 UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+PROXY_RE = re.compile(
+    r"^(?:(?P<proto>https?|socks4a?|socks5h?)://)?"
+    r"(?:(?P<auth>[^@\s/]+)@)?"
+    r"(?P<host>\d{1,3}(?:\.\d{1,3}){3}|[A-Za-z0-9._-]+):(?P<port>\d{2,5})"
+)
+
 
 # --------------------------------------------------------------------------- #
-# Input loading
+# Parsing / loading
 # --------------------------------------------------------------------------- #
 
-def normalize_proxy(line: str):
-    """Return (proto_or_None, 'host:port', auth_or_None) or None if invalid."""
+def normalize_proxy(line: str, default_proto: str | None = None):
+    """Parse a proxy line tolerantly. Returns (proto|None, 'host:port', auth|None)."""
     line = line.strip()
     if not line or line.startswith("#"):
         return None
-    m = PROXY_RE.match(line)
+    # Many lists append "  country" or "ip:port:country" -> take the address head.
+    token = line.split()[0].split(",")[0]
+    m = PROXY_RE.match(token)
     if not m:
         return None
     proto = m.group("proto")
-    if proto == "socks4a":
-        proto = "socks4"
-    if proto == "https":
-        proto = "http"  # https here means "http proxy"; tunneling tested separately
-    host = m.group("host")
-    port = m.group("port")
-    if not (0 < int(port) < 65536):
+    if proto:
+        proto = proto.replace("socks4a", "socks4").replace("socks5h", "socks5")
+        if proto == "https":
+            proto = "http"
+    else:
+        proto = default_proto if default_proto not in (None, "mixed") else None
+    port = int(m.group("port"))
+    if not (0 < port < 65536):
         return None
-    auth = m.group("auth")
-    return proto, f"{host}:{port}", auth
+    return proto, f"{m.group('host')}:{port}", m.group("auth")
 
 
-def read_lines_from_text(text: str):
-    for raw in text.splitlines():
-        parsed = normalize_proxy(raw)
-        if parsed:
-            yield parsed
+def load_sources_config():
+    """Return list of {url, protocol}. Merges sources.json + optional sources.txt."""
+    sources = []
+    if SOURCES_JSON.is_file():
+        try:
+            data = json.loads(SOURCES_JSON.read_text(encoding="utf-8"))
+            for item in data:
+                if isinstance(item, dict) and item.get("url"):
+                    sources.append({"url": item["url"], "protocol": item.get("protocol")})
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[!] could not parse sources.json: {exc}", file=sys.stderr)
+    if SOURCES_TXT.is_file():
+        for ln in SOURCES_TXT.read_text(encoding="utf-8", errors="ignore").splitlines():
+            ln = ln.strip()
+            if ln and not ln.startswith("#"):
+                sources.append({"url": ln, "protocol": None})
+    return sources
 
 
-def load_local_candidates():
-    """Collect proxies from lists/*.txt and proxies.txt."""
-    candidates = []
+def load_local_files():
+    """Read lists/*.txt and proxies.txt (untagged -> try all protocols)."""
+    out = []
     files = []
     if LISTS_DIR.is_dir():
         files.extend(sorted(LISTS_DIR.glob("*.txt")))
@@ -121,68 +150,90 @@ def load_local_candidates():
         files.append(LOCAL_PROXIES)
     for fp in files:
         try:
-            candidates.extend(read_lines_from_text(fp.read_text(encoding="utf-8", errors="ignore")))
+            for ln in fp.read_text(encoding="utf-8", errors="ignore").splitlines():
+                p = normalize_proxy(ln)
+                if p:
+                    out.append(p)
         except OSError as exc:
             print(f"[!] could not read {fp}: {exc}", file=sys.stderr)
-    if files:
-        print(f"[*] loaded {len(candidates)} entries from {len(files)} local file(s)")
-    return candidates
+    if out:
+        print(f"[*] {len(out)} entries from local files")
+    return out
 
 
-async def fetch_source(session: aiohttp.ClientSession, url: str):
-    try:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as resp:
-            if resp.status == 200:
-                text = await resp.text()
-                got = list(read_lines_from_text(text))
-                print(f"[*] source {url} -> {len(got)} proxies")
-                return got
-            print(f"[!] source {url} -> HTTP {resp.status}", file=sys.stderr)
-    except Exception as exc:  # noqa: BLE001 - network sources are best-effort
-        print(f"[!] source {url} failed: {exc}", file=sys.stderr)
-    return []
+async def fetch_source(session, src, sem):
+    url, proto = src["url"], src.get("protocol")
+    async with sem:
+        try:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as r:
+                if r.status != 200:
+                    print(f"[!] {url} -> HTTP {r.status}", file=sys.stderr)
+                    return []
+                text = await r.text()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[!] {url} failed: {exc}", file=sys.stderr)
+            return []
+    got = [p for p in (normalize_proxy(ln, proto) for ln in text.splitlines()) if p]
+    print(f"[*] {len(got):>7} from {url}")
+    return got
 
 
-async def load_remote_candidates():
-    if not SOURCES_FILE.is_file():
-        return []
-    urls = [
-        ln.strip()
-        for ln in SOURCES_FILE.read_text(encoding="utf-8", errors="ignore").splitlines()
-        if ln.strip() and not ln.strip().startswith("#")
-    ]
-    if not urls:
-        return []
+async def build_candidate_table():
+    """Fetch every source + local lists, de-duplicate by host:port."""
+    sources = load_sources_config()
+    sem = asyncio.Semaphore(16)
     headers = {"User-Agent": UA}
     async with aiohttp.ClientSession(headers=headers) as session:
-        results = await asyncio.gather(*(fetch_source(session, u) for u in urls))
-    merged = [p for sub in results for p in sub]
-    print(f"[*] loaded {len(merged)} entries from {len(urls)} remote source(s)")
-    return merged
+        batches = await asyncio.gather(*(fetch_source(session, s, sem) for s in sources))
+    all_entries = [p for b in batches for p in b] + load_local_files()
+
+    table: dict[str, dict] = {}
+    for proto, addr, auth in all_entries:
+        cur = table.setdefault(addr, {"protocols": set(), "auth": None})
+        if proto:
+            cur["protocols"].add(proto)
+        if auth and not cur["auth"]:
+            cur["auth"] = auth
+    print(f"[*] {len(table)} unique candidates after de-duplication")
+    return table
 
 
-def dedupe_candidates(candidates):
-    """Merge by host:port. Keep an explicit protocol hint if any line provided one."""
+def write_candidates(table, path: Path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as fh:
+        for addr, info in table.items():
+            fh.write(json.dumps({
+                "addr": addr,
+                "protocols": sorted(info["protocols"]),
+                "auth": info["auth"],
+            }) + "\n")
+    print(f"[+] wrote {len(table)} candidates -> {path}")
+
+
+def read_candidates(path: Path, shard=None):
+    """Read candidates.jsonl, optionally keeping only one shard (i, n)."""
     table = {}
-    for proto, addr, auth in candidates:
-        cur = table.get(addr)
-        if cur is None:
-            table[addr] = {"proto": proto, "auth": auth}
-        else:
-            if cur["proto"] is None and proto is not None:
-                cur["proto"] = proto
-            if cur["auth"] is None and auth is not None:
-                cur["auth"] = auth
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            addr = rec["addr"]
+            if shard is not None:
+                i, n = shard
+                if zlib.crc32(addr.encode()) % n != i:
+                    continue
+            table[addr] = {"protocols": set(rec.get("protocols") or []), "auth": rec.get("auth")}
     return table
 
 
 # --------------------------------------------------------------------------- #
-# Validation core
+# Validation
 # --------------------------------------------------------------------------- #
 
 async def get_real_ip():
-    headers = {"User-Agent": UA}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with aiohttp.ClientSession(headers={"User-Agent": UA}) as session:
         for url in REAL_IP_URLS:
             try:
                 async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
@@ -195,15 +246,12 @@ async def get_real_ip():
     return None
 
 
-def build_proxy_url(proto: str, addr: str, auth: str | None) -> str:
-    if auth:
-        return f"{proto}://{auth}@{addr}"
-    return f"{proto}://{addr}"
+def proxy_url(proto, addr, auth):
+    return f"{proto}://{auth}@{addr}" if auth else f"{proto}://{addr}"
 
 
-async def _request_through(proto, addr, auth, url, timeout, want_json=True):
-    """Single request through the proxy. Returns (latency_ms, payload) or raises."""
-    connector = ProxyConnector.from_url(build_proxy_url(proto, addr, auth))
+async def _request(proto, addr, auth, url, timeout, want_json=True):
+    connector = ProxyConnector.from_url(proxy_url(proto, addr, auth))
     headers = {"User-Agent": UA, "Accept": "*/*"}
     t0 = time.perf_counter()
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
@@ -215,41 +263,32 @@ async def _request_through(proto, addr, auth, url, timeout, want_json=True):
 
 
 def classify_anonymity(hdr_payload, real_ip):
-    """Inspect httpbin /get response: headers + origin -> anonymity level."""
     try:
         headers = {k.lower(): v for k, v in (hdr_payload.get("headers") or {}).items()}
         origin = (hdr_payload.get("origin") or "").lower()
     except AttributeError:
         return "unknown"
-    leaks_real_ip = bool(real_ip) and real_ip in origin
-    forwarding = any(h in headers for h in ("via", "x-forwarded-for", "forwarded", "proxy-connection"))
-    if leaks_real_ip:
+    if real_ip and real_ip in origin:
         return "transparent"
-    if forwarding:
+    if any(h in headers for h in ("via", "x-forwarded-for", "forwarded", "proxy-connection")):
         return "anonymous"
     return "elite"
 
 
 async def check_proxy(addr, info, timeout, sem, real_ip):
-    """Try protocols until one works; return result dict or None."""
-    proto_hint = info["proto"]
+    candidates = sorted(info["protocols"]) or list(PROTOCOLS)
     auth = info["auth"]
-    candidates = [proto_hint] if proto_hint else list(PROTOCOLS)
-
     async with sem:
         for proto in candidates:
             try:
-                # 1) liveness + latency + geo (two hits; require both to pass)
-                lat1, geo = await _request_through(proto, addr, auth, GEO_JUDGE, timeout)
+                lat1, geo = await _request(proto, addr, auth, GEO_JUDGE, timeout)
                 if not isinstance(geo, dict) or geo.get("status") != "success":
                     raise RuntimeError("geo judge rejected")
-                lat2, _ = await _request_through(proto, addr, auth, GEO_JUDGE, timeout)
-                latency = round(min(lat1, lat2), 1)
-
+                lat2, _ = await _request(proto, addr, auth, GEO_JUDGE, timeout)
                 result = {
                     "proxy": addr,
                     "protocol": proto,
-                    "latency_ms": latency,
+                    "latency_ms": round(min(lat1, lat2), 1),
                     "country": geo.get("country"),
                     "country_code": geo.get("countryCode"),
                     "exit_ip": geo.get("query"),
@@ -257,169 +296,312 @@ async def check_proxy(addr, info, timeout, sem, real_ip):
                     "anonymity": "unknown",
                     "checked_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 }
-
-                # 2) anonymity (best effort)
                 try:
-                    _, hdrs = await _request_through(proto, addr, auth, HDR_JUDGE, timeout)
+                    _, hdrs = await _request(proto, addr, auth, HDR_JUDGE, timeout)
                     result["anonymity"] = classify_anonymity(hdrs, real_ip)
                 except Exception:  # noqa: BLE001
                     pass
-
-                # 3) https tunneling capability (best effort)
                 try:
-                    await _request_through(proto, addr, auth, TLS_JUDGE, timeout)
+                    await _request(proto, addr, auth, TLS_JUDGE, timeout)
                     result["https"] = True
                 except Exception:  # noqa: BLE001
                     pass
-
                 return result
-            except Exception:  # noqa: BLE001 - try next protocol
+            except Exception:  # noqa: BLE001
                 continue
     return None
 
 
-# --------------------------------------------------------------------------- #
-# Output
-# --------------------------------------------------------------------------- #
-
-def write_outputs(results, started_at, elapsed, total_candidates):
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    results.sort(key=lambda r: r["latency_ms"])  # fastest first
-
-    def proxy_line(r):
-        return f"{r['protocol']}://{r['proxy']}"
-
-    # combined working list (fastest first)
-    (RESULTS_DIR / "working.txt").write_text(
-        "\n".join(proxy_line(r) for r in results) + ("\n" if results else ""),
-        encoding="utf-8",
-    )
-    # top-25 fastest
-    (RESULTS_DIR / "best.txt").write_text(
-        "\n".join(proxy_line(r) for r in results[:25]) + ("\n" if results else ""),
-        encoding="utf-8",
-    )
-    # per protocol
-    for proto in PROTOCOLS:
-        subset = [r for r in results if r["protocol"] == proto]
-        (RESULTS_DIR / f"{proto}.txt").write_text(
-            "\n".join(proxy_line(r) for r in subset) + ("\n" if subset else ""),
-            encoding="utf-8",
-        )
-    # https-capable subset
-    https_subset = [r for r in results if r["https"]]
-    (RESULTS_DIR / "https_capable.txt").write_text(
-        "\n".join(proxy_line(r) for r in https_subset) + ("\n" if https_subset else ""),
-        encoding="utf-8",
-    )
-
-    # full detail json
-    (RESULTS_DIR / "proxies.json").write_text(
-        json.dumps(results, indent=2), encoding="utf-8"
-    )
-
-    # summary json
-    by_proto = {p: sum(1 for r in results if r["protocol"] == p) for p in PROTOCOLS}
-    by_anon = {}
-    for r in results:
-        by_anon[r["anonymity"]] = by_anon.get(r["anonymity"], 0) + 1
-    summary = {
-        "generated_at": started_at,
-        "elapsed_seconds": round(elapsed, 1),
-        "candidates_checked": total_candidates,
-        "working": len(results),
-        "https_capable": len(https_subset),
-        "by_protocol": by_proto,
-        "by_anonymity": by_anon,
-        "fastest_ms": results[0]["latency_ms"] if results else None,
-        "slowest_ms": results[-1]["latency_ms"] if results else None,
-    }
-    (RESULTS_DIR / "summary.json").write_text(
-        json.dumps(summary, indent=2), encoding="utf-8"
-    )
-    return summary
-
-
-# --------------------------------------------------------------------------- #
-# Orchestration
-# --------------------------------------------------------------------------- #
-
-async def run_once(concurrency, timeout):
-    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    t0 = time.perf_counter()
-
-    local, remote = await asyncio.gather(
-        asyncio.to_thread(load_local_candidates),
-        load_remote_candidates(),
-    )
-    table = dedupe_candidates(local + remote)
-    total = len(table)
-    if total == 0:
-        print("[!] no candidate proxies found. Add lists/*.txt, proxies.txt, or sources.txt")
-        write_outputs([], started_at, time.perf_counter() - t0, 0)
-        return
-
-    real_ip = await get_real_ip()
-    print(f"[*] runner public IP: {real_ip or 'unknown'}")
-    print(f"[*] validating {total} unique proxies (concurrency={concurrency}, timeout={timeout}s)...")
-
+async def validate_table(table, concurrency, timeout, real_ip):
     sem = asyncio.Semaphore(concurrency)
-    tasks = [
-        asyncio.create_task(check_proxy(addr, info, timeout, sem, real_ip))
-        for addr, info in table.items()
-    ]
-
-    results = []
-    done = 0
+    tasks = [asyncio.create_task(check_proxy(a, i, timeout, sem, real_ip)) for a, i in table.items()]
+    total = len(tasks)
+    results, done = [], 0
     for fut in asyncio.as_completed(tasks):
         res = await fut
         done += 1
         if res:
             results.append(res)
-        if done % 200 == 0 or done == total:
+        if done % 500 == 0 or done == total:
             print(f"    progress {done}/{total} | working {len(results)}")
+    return results
 
-    summary = write_outputs(results, started_at, time.perf_counter() - t0, total)
-    print(
-        f"[+] done in {summary['elapsed_seconds']}s | "
-        f"working {summary['working']}/{total} | "
-        f"https {summary['https_capable']} | "
-        f"fastest {summary['fastest_ms']} ms"
+
+# --------------------------------------------------------------------------- #
+# Ranking + outputs
+# --------------------------------------------------------------------------- #
+
+def dedupe_working(results):
+    """Keep the fastest record per host:port."""
+    best = {}
+    for r in results:
+        cur = best.get(r["proxy"])
+        if cur is None or r["latency_ms"] < cur["latency_ms"]:
+            best[r["proxy"]] = r
+    return list(best.values())
+
+
+def load_history():
+    if HISTORY_FILE.is_file():
+        try:
+            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            pass
+    return {"run_index": 0, "proxies": {}}
+
+
+def update_history_and_rank(working, history):
+    run = history.get("run_index", 0) + 1
+    history["run_index"] = run
+    hp = history.setdefault("proxies", {})
+
+    for r in working:
+        addr = r["proxy"]
+        h = hp.get(addr)
+        if h is None:
+            h = {"first_run": run, "working_count": 0, "ema_latency_ms": r["latency_ms"]}
+            hp[addr] = h
+        h["last_run"] = run
+        h["working_count"] = h.get("working_count", 0) + 1
+        h["ema_latency_ms"] = round(
+            EMA_ALPHA * r["latency_ms"] + (1 - EMA_ALPHA) * h.get("ema_latency_ms", r["latency_ms"]), 1
+        )
+        h["protocol"] = r["protocol"]
+        h["country"] = r["country"]
+        h["country_code"] = r["country_code"]
+        h["https"] = r["https"]
+        h["anonymity"] = r["anonymity"]
+
+    # prune stale entries
+    for addr in [a for a, h in hp.items() if run - h.get("last_run", run) > PRUNE_AFTER_RUNS]:
+        del hp[addr]
+
+    # ranking over the currently-working set
+    if working:
+        lats = [r["latency_ms"] for r in working]
+        lo, hi = min(lats), max(lats)
+        span = (hi - lo) or 1.0
+    else:
+        lo, span = 0.0, 1.0
+
+    ranked = []
+    for r in working:
+        h = hp[r["proxy"]]
+        window = run - h["first_run"] + 1
+        uptime = h["working_count"] / window if window else 1.0
+        norm_lat = (r["latency_ms"] - lo) / span
+        score = 100 * (
+            W_SPEED * (1 - norm_lat)
+            + W_UPTIME * uptime
+            + W_HTTPS * (1 if r["https"] else 0)
+            + W_ELITE * (1 if r["anonymity"] == "elite" else 0)
+        )
+        ranked.append({
+            **r,
+            "ema_latency_ms": h["ema_latency_ms"],
+            "uptime": round(uptime, 3),
+            "working_count": h["working_count"],
+            "runs_observed": window,
+            "score": round(score, 2),
+        })
+    ranked.sort(key=lambda x: (-x["score"], x["latency_ms"]))
+    return ranked, run
+
+
+def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    by_speed = sorted(ranked, key=lambda r: r["latency_ms"])
+
+    def line(r):
+        return f"{r['protocol']}://{r['proxy']}"
+
+    def dump_txt(name, rows):
+        (RESULTS_DIR / name).write_text(
+            "\n".join(line(r) for r in rows) + ("\n" if rows else ""), encoding="utf-8"
+        )
+
+    dump_txt("working.txt", by_speed)                       # fastest first
+    dump_txt("best.txt", by_speed[:25])                     # top 25 fastest
+    dump_txt("ranked.txt", ranked)                          # by composite score
+    dump_txt("https_capable.txt", [r for r in by_speed if r["https"]])
+    for proto in PROTOCOLS:
+        dump_txt(f"{proto}.txt", [r for r in by_speed if r["protocol"] == proto])
+
+    (RESULTS_DIR / "ranked.json").write_text(json.dumps(ranked, indent=2), encoding="utf-8")
+    (RESULTS_DIR / "proxies.json").write_text(json.dumps(by_speed, indent=2), encoding="utf-8")
+
+    # per-country breakdown
+    by_country = {}
+    for r in by_speed:
+        cc = r["country_code"] or "??"
+        c = by_country.setdefault(cc, {"country": r["country"], "count": 0,
+                                       "fastest_ms": r["latency_ms"], "top": line(r)})
+        c["count"] += 1
+        if r["latency_ms"] < c["fastest_ms"]:
+            c["fastest_ms"] = r["latency_ms"]
+            c["top"] = line(r)
+    (RESULTS_DIR / "by_country.json").write_text(
+        json.dumps(dict(sorted(by_country.items(), key=lambda kv: -kv[1]["count"])), indent=2),
+        encoding="utf-8",
     )
 
+    summary = {
+        "generated_at": started_at,
+        "run_index": run_index,
+        "elapsed_seconds": round(elapsed, 1),
+        "candidates_checked": total_checked,
+        "working": len(ranked),
+        "https_capable": sum(1 for r in ranked if r["https"]),
+        "by_protocol": {p: sum(1 for r in ranked if r["protocol"] == p) for p in PROTOCOLS},
+        "by_anonymity": _count(ranked, "anonymity"),
+        "countries": len(by_country),
+        "fastest_ms": by_speed[0]["latency_ms"] if by_speed else None,
+        "top_ranked": ranked[0] if ranked else None,
+    }
+    (RESULTS_DIR / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    return summary
 
-def parse_args(argv=None):
-    p = argparse.ArgumentParser(description="Sexy_Proxy deep async proxy validator")
-    p.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "300")),
-                   help="max simultaneous proxy checks (default 300)")
-    p.add_argument("--timeout", type=float, default=float(os.getenv("TIMEOUT", "8")),
-                   help="per-request timeout in seconds (default 8)")
+
+def _count(rows, key):
+    out = {}
+    for r in rows:
+        out[r[key]] = out.get(r[key], 0) + 1
+    return out
+
+
+def finalize(working, started_at, elapsed, total_checked):
+    working = dedupe_working(working)
+    history = load_history()
+    ranked, run = update_history_and_rank(working, history)
+    summary = write_outputs(ranked, run, started_at, elapsed, total_checked)
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    print(
+        f"[+] run #{run} | checked {total_checked} | working {summary['working']} | "
+        f"https {summary['https_capable']} | countries {summary['countries']} | "
+        f"fastest {summary['fastest_ms']} ms"
+    )
+    if summary["top_ranked"]:
+        t = summary["top_ranked"]
+        print(f"[+] #1 ranked: {t['protocol']}://{t['proxy']} "
+              f"score={t['score']} lat={t['latency_ms']}ms uptime={t['uptime']} {t['country']}")
+    return summary
+
+
+# --------------------------------------------------------------------------- #
+# Modes
+# --------------------------------------------------------------------------- #
+
+async def mode_prepare(args):
+    table = await build_candidate_table()
+    write_candidates(table, Path(args.out))
+
+
+async def mode_validate(args):
+    shard = None
+    if args.shard:
+        i, n = (int(x) for x in args.shard.split(":"))
+        shard = (i, n)
+    table = read_candidates(Path(args.candidates), shard=shard)
+    if args.max and len(table) > args.max:
+        table = dict(list(table.items())[: args.max])
+    real_ip = await get_real_ip()
+    label = f"shard {shard[0]+1}/{shard[1]}" if shard else "all"
+    print(f"[*] validating {len(table)} candidates ({label}) "
+          f"concurrency={args.concurrency} timeout={args.timeout}s real_ip={real_ip}")
+    results = await validate_table(table, args.concurrency, args.timeout, real_ip)
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"checked": len(table), "working": results}), encoding="utf-8")
+    print(f"[+] {len(results)} working -> {out}")
+
+
+def mode_merge(args):
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    files = sorted(globmod.glob(args.partials))
+    if not files:
+        print(f"[!] no partial files matched: {args.partials}", file=sys.stderr)
+    working, total = [], 0
+    for fp in files:
+        try:
+            data = json.loads(Path(fp).read_text(encoding="utf-8"))
+            working.extend(data.get("working", []))
+            total += int(data.get("checked", 0))
+        except (json.JSONDecodeError, OSError) as exc:
+            print(f"[!] bad partial {fp}: {exc}", file=sys.stderr)
+    print(f"[*] merging {len(files)} partials | raw working {len(working)} | checked {total}")
+    finalize(working, started_at, 0.0, total)
+
+
+async def mode_all_inline(args):
+    """prepare + validate + merge in one process (local / --loop)."""
+    started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    t0 = time.perf_counter()
+    table = await build_candidate_table()
+    if not table:
+        print("[!] no candidates. Check sources.json / lists/.")
+        finalize([], started_at, time.perf_counter() - t0, 0)
+        return
+    real_ip = await get_real_ip()
+    print(f"[*] validating {len(table)} candidates inline "
+          f"(concurrency={args.concurrency}, timeout={args.timeout}s, real_ip={real_ip})")
+    results = await validate_table(table, args.concurrency, args.timeout, real_ip)
+    finalize(results, started_at, time.perf_counter() - t0, len(table))
+
+
+# --------------------------------------------------------------------------- #
+# CLI
+# --------------------------------------------------------------------------- #
+
+def build_parser():
+    p = argparse.ArgumentParser(description="Sexy_Proxy validator + ranking engine")
+    p.add_argument("--concurrency", type=int, default=int(os.getenv("CONCURRENCY", "500")))
+    p.add_argument("--timeout", type=float, default=float(os.getenv("TIMEOUT", "7")))
     p.add_argument("--loop", type=int, default=int(os.getenv("LOOP_SECONDS", "0")),
-                   help="re-run every N seconds (0 = run once). Use 30 for the 30s goal.")
-    return p.parse_args(argv)
+                   help="inline mode only: repeat every N seconds")
+    sub = p.add_subparsers(dest="mode")
+
+    sp = sub.add_parser("prepare", help="fetch+dedupe+tag -> candidates.jsonl")
+    sp.add_argument("--out", default="candidates.jsonl")
+
+    sv = sub.add_parser("validate", help="validate one shard -> partial json")
+    sv.add_argument("--candidates", default="candidates.jsonl")
+    sv.add_argument("--shard", help="i:n  e.g. 0:16")
+    sv.add_argument("--max", type=int, default=0, help="cap candidates (0 = no cap)")
+    sv.add_argument("--out", required=True)
+
+    sm = sub.add_parser("merge", help="merge partials -> ranked results/")
+    sm.add_argument("--partials", default="partials/*.json")
+    return p
 
 
-async def main_async(args):
-    if args.loop > 0:
-        print(f"[*] loop mode: every {args.loop}s (Ctrl+C to stop)")
-        while True:
-            cycle_start = time.perf_counter()
-            try:
-                await run_once(args.concurrency, args.timeout)
-            except Exception as exc:  # noqa: BLE001 - keep the loop alive
-                print(f"[!] cycle error: {exc}", file=sys.stderr)
-            sleep_for = max(0.0, args.loop - (time.perf_counter() - cycle_start))
-            if sleep_for:
-                print(f"[*] next cycle in {sleep_for:.0f}s\n")
-                await asyncio.sleep(sleep_for)
+async def dispatch(args):
+    if args.mode == "prepare":
+        await mode_prepare(args)
+    elif args.mode == "validate":
+        await mode_validate(args)
+    elif args.mode == "merge":
+        mode_merge(args)            # sync
     else:
-        await run_once(args.concurrency, args.timeout)
+        await mode_all_inline(args)
 
 
 def main():
-    args = parse_args()
+    args = build_parser().parse_args()
     try:
-        asyncio.run(main_async(args))
+        if args.loop > 0 and args.mode in (None, "validate"):
+            print(f"[*] loop mode: every {args.loop}s (Ctrl+C to stop)")
+            while True:
+                start = time.perf_counter()
+                try:
+                    asyncio.run(dispatch(args))
+                except Exception as exc:  # noqa: BLE001
+                    print(f"[!] cycle error: {exc}", file=sys.stderr)
+                sleep_for = max(0.0, args.loop - (time.perf_counter() - start))
+                print(f"[*] next cycle in {sleep_for:.0f}s\n")
+                time.sleep(sleep_for)
+        else:
+            asyncio.run(dispatch(args))
     except KeyboardInterrupt:
         print("\n[*] stopped.")
 

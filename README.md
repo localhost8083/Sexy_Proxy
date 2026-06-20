@@ -1,82 +1,107 @@
-# Sexy_Proxy — Auto Proxy Validator
+# Sexy_Proxy — Auto Proxy Validator + Ranking Engine
 
-Deep, asynchronous proxy validator. It pulls proxies from public sources and/or
-your own lists, **really tests each one**, and publishes the working set —
-sorted fastest-first — as both `.txt` and `.json`.
+Pulls proxies from many large public sources, **deeply validates** them in
+parallel, and publishes a **ranked** set of real, working, fastest proxies as
+`.txt` and `.json`.
 
-## What "deep validation" means here
+Built to handle very large pools — the bundled sources currently total
+**~250k+ unique candidates** per run.
 
-For every candidate proxy the validator:
+## Pipeline (3 stages, parallelized)
 
-1. **Detects the protocol** — tries `http`, `socks4`, `socks5` (or trusts the
-   protocol prefix if the line already has one).
-2. **Confirms it actually proxies traffic** — makes a real request through it
-   to a judge endpoint **twice** and requires both to succeed, filtering out
-   flaky / one-shot / honeypot proxies.
-3. **Measures latency** in milliseconds (keeps the fastest of the two hits).
-4. **Tests HTTPS tunneling** — a TLS request through the proxy to mark it
-   `https`-capable.
-5. **Classifies anonymity** — `transparent` (leaks your real IP),
-   `anonymous` (sends proxy/forwarding headers), or `elite` (clean).
-6. **Resolves geo** — country + country code + the proxy's exit IP via ip-api.
+```
+prepare  →  validate (16 parallel shards)  →  merge + rank + commit
+```
 
-## Inputs (auto-discovered, merged, de-duplicated)
+1. **prepare** — fetch every source + local lists, de-duplicate, and tag each
+   proxy with its source protocol. Writes `candidates.jsonl`.
+2. **validate** — 16 parallel jobs each validate one shard of the candidates,
+   so the whole pool is checked at ~16× speed. Each writes a partial result.
+3. **merge** — combine all partials, de-duplicate (keep fastest), update the
+   rolling history, **rank** everything, and write `results/`.
 
-| Source | How |
-|--------|-----|
-| `lists/*.txt` | Drop any number of `.txt` files in `lists/`. |
-| `proxies.txt` | Optional single file in repo root. |
-| `sources.txt` | Remote raw proxy-list URLs (one per line). |
+## Deep validation (per proxy)
 
-Accepted line formats: `ip:port`, `proto://ip:port`, `user:pass@ip:port`.
+- Protocol confirmed — `http` / `socks4` / `socks5` (tag-driven ⇒ 1 attempt).
+- Proxies traffic for real — a request is made **through** it **twice**;
+  both must succeed (filters flaky / one-shot / honeypot proxies).
+- **Latency** measured in ms (fastest of the two hits).
+- **HTTPS tunneling** tested (TLS through the proxy).
+- **Anonymity** classified: `transparent` / `anonymous` / `elite`.
+- **Geo** resolved: country, country code, exit IP.
 
-## Outputs (written to `results/`)
+## Ranking engine
+
+Each working proxy gets a composite **score (0–100)**:
+
+```
+score = 45% speed  +  40% uptime  +  10% https  +  5% elite-anonymity
+```
+
+`uptime` (a.k.a. success rate) comes from `results/history.json`, a rolling
+record kept across runs: how consistently a proxy has been working since it was
+first seen, plus an EMA of its latency. Stale proxies (unseen for 50 runs) are
+pruned automatically.
+
+## Sources
+
+- **`sources.json`** — the curated, protocol-tagged source list (primary).
+  Each entry is `{ "url": ..., "protocol": "http|socks4|socks5|mixed" }`.
+  Tagging lets the validator try only one protocol per proxy.
+- **`sources.txt`** — optional untagged extras (tried against all protocols).
+- **`lists/*.txt`** and **`proxies.txt`** — your own local lists.
+
+Accepted line formats: `ip:port`, `proto://ip:port`, `user:pass@ip:port`,
+and tolerant of `ip:port:country` / trailing columns.
+
+## Outputs (`results/`)
 
 | File | Contents |
 |------|----------|
-| `working.txt` | All working proxies, `proto://ip:port`, **fastest first**. |
+| `ranked.txt` | Working proxies ordered by composite **score** (best first). |
+| `ranked.json` | Full ranking detail: score, uptime, latency, ema, country, https, anonymity. |
+| `working.txt` | All working proxies, **fastest first**. |
 | `best.txt` | Top 25 fastest. |
 | `http.txt` / `socks4.txt` / `socks5.txt` | Per-protocol, fastest first. |
 | `https_capable.txt` | Subset that tunnels HTTPS. |
-| `proxies.json` | Full detail per proxy (latency, anonymity, geo, https, timestamp). |
-| `summary.json` | Counts, fastest/slowest, run metadata. |
+| `by_country.json` | Per-country counts + fastest proxy. |
+| `proxies.json` | Current working set (full detail). |
+| `summary.json` | Run metadata + counts. |
+| `history.json` | Rolling per-proxy uptime/latency history (powers ranking). |
 
 ## Local usage
 
 ```bash
 pip install -r requirements.txt
 
-python validator.py                      # one full pass
-python validator.py --loop 30            # re-validate every 30 seconds
-python validator.py --concurrency 400 --timeout 8
+# all-in-one (prepare + validate + merge in one process)
+python validator.py
+python validator.py --loop 600          # repeat every 10 minutes
+
+# staged (mirrors the workflow)
+python validator.py prepare  --out candidates.jsonl
+python validator.py --concurrency 500 --timeout 7 \
+        validate --candidates candidates.jsonl --shard 0:16 --out partials/0.json
+python validator.py merge --partials "partials/*.json"
 ```
 
-Environment variables also work: `CONCURRENCY`, `TIMEOUT`, `LOOP_SECONDS`.
+Env vars: `CONCURRENCY`, `TIMEOUT`, `LOOP_SECONDS`.
+(Global flags like `--concurrency` go **before** the subcommand.)
 
 ## Schedule
 
-The included workflow (`.github/workflows/validate.yml`) runs **every 10
-minutes**. Runs never overlap: a `concurrency` group makes the next run wait
-until the current one finishes before starting. Each run re-validates
-everything and commits the refreshed `results/`.
+`.github/workflows/validate.yml` runs **every 10 minutes**. The `concurrency`
+group ensures runs never overlap — the next pipeline waits for the current one
+to finish. The merge job commits refreshed `results/` (including `history.json`,
+so rankings improve over time).
 
-> GitHub-hosted cron is best-effort — a run can occasionally be delayed or
-> skipped under load. If you ever need a guaranteed, faster cadence, run the
-> validator in loop mode on any always-on machine instead:
->
-> ```bash
-> python validator.py --loop 600     # re-validate every 10 minutes locally
-> ```
+> GitHub-hosted cron is best-effort — runs can be delayed/skipped under load.
+> For a guaranteed faster cadence, run `python validator.py --loop 600` on any
+> always-on machine (VPS / self-hosted runner).
 
-## How it works (under the hood)
+> ⚠️ The first scheduled run must be allowed to commit: enable
+> **Settings → Actions → General → Workflow permissions → Read and write**.
 
-- `asyncio` + `aiohttp` + `aiohttp_socks` for high concurrency (hundreds of
-  simultaneous checks).
-- A semaphore caps concurrency so the runner/box isn't overwhelmed.
-- Judges: `ip-api.com` (liveness + geo), `httpbin.org/get` (anonymity headers),
-  `api.ipify.org` over HTTPS (TLS tunnel test).
-- Results are always sorted by latency before writing, so consumers can just
-  take the top N for the fastest proxies.
-
-> Public free proxies are volatile — most candidates will fail, and a proxy that
-> works now may die in minutes. That's expected; re-run often.
+> Public free proxies are volatile — most candidates fail, and a proxy that
+> works now may die in minutes. That's expected; the ranking/history smooths
+> this by rewarding proxies with consistent uptime.

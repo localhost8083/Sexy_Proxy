@@ -1,23 +1,21 @@
 name: Validate Proxies
 
-# NOTE: GitHub-hosted cron is best-effort (runs can be delayed/skipped under
-# load). The `concurrency` block below guarantees a new run never overlaps an
-# in-progress one — the next run waits for the current to finish.
+# Runs every 10 minutes; the concurrency group guarantees a new pipeline never
+# overlaps an in-progress one (the next run waits for the current to finish).
+#
+# Pipeline:  prepare  ->  validate (16 parallel shards)  ->  merge + rank + commit
 on:
   schedule:
-    - cron: "*/10 * * * *"     # every 10 minutes
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       concurrency:
-        description: "Max simultaneous checks"
-        default: "300"
-        required: false
+        description: "Max simultaneous checks per shard"
+        default: "500"
       timeout:
         description: "Per-request timeout (seconds)"
-        default: "8"
-        required: false
+        default: "7"
 
-# Don't pile up overlapping runs; let the current one finish.
 concurrency:
   group: validate-proxies
   cancel-in-progress: false
@@ -25,29 +23,77 @@ concurrency:
 permissions:
   contents: write
 
+env:
+  PY: "3.11"
+
 jobs:
+  # ----------------------------------------------------------------------- #
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -r requirements.txt
+      - name: Fetch + dedupe + tag all sources
+        run: python validator.py prepare --out candidates.jsonl
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidates
+          path: candidates.jsonl
+          retention-days: 1
+
+  # ----------------------------------------------------------------------- #
   validate:
+    needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Validate proxies
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with: { name: candidates }
+      - name: Validate shard ${{ matrix.shard }}/16
         env:
-          CONCURRENCY: ${{ github.event.inputs.concurrency || '300' }}
-          TIMEOUT: ${{ github.event.inputs.timeout || '8' }}
-        run: python validator.py
+          CONCURRENCY: ${{ github.event.inputs.concurrency || '500' }}
+          TIMEOUT: ${{ github.event.inputs.timeout || '7' }}
+        run: |
+          python validator.py validate \
+            --candidates candidates.jsonl \
+            --shard ${{ matrix.shard }}:16 \
+            --out partials/${{ matrix.shard }}.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: partial-${{ matrix.shard }}
+          path: partials/${{ matrix.shard }}.json
+          retention-days: 1
 
+  # ----------------------------------------------------------------------- #
+  merge:
+    needs: validate
+    if: always()          # rank whatever shards succeeded, even if some failed
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4          # brings results/history.json forward
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+      - run: pip install -r requirements.txt
+      - name: Collect all shard partials
+        uses: actions/download-artifact@v4
+        with:
+          pattern: partial-*
+          path: partials
+          merge-multiple: true
+      - name: Merge + rank
+        run: python validator.py merge --partials "partials/*.json"
       - name: Commit results
         run: |
           git config user.name  "github-actions[bot]"
@@ -56,6 +102,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No changes to commit."
           else
-            git commit -m "chore: update validated proxies [skip ci]"
+            git commit -m "chore: refresh ranked proxies [skip ci]"
             git push
           fi

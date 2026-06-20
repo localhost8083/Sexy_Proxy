@@ -9,3 +9,7 @@ env/
 
 # Local-only scratch proxy input (uncomment if you don't want to track it)
 # proxies.txt
+
+# Pipeline build artifacts (regenerated each run)
+candidates.jsonl
+partials/
