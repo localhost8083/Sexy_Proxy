@@ -1,0 +1,61 @@
+name: Validate Proxies
+
+# NOTE: GitHub-hosted cron is best-effort (runs can be delayed/skipped under
+# load). The `concurrency` block below guarantees a new run never overlaps an
+# in-progress one — the next run waits for the current to finish.
+on:
+  schedule:
+    - cron: "*/10 * * * *"     # every 10 minutes
+  workflow_dispatch:
+    inputs:
+      concurrency:
+        description: "Max simultaneous checks"
+        default: "300"
+        required: false
+      timeout:
+        description: "Per-request timeout (seconds)"
+        default: "8"
+        required: false
+
+# Don't pile up overlapping runs; let the current one finish.
+concurrency:
+  group: validate-proxies
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate proxies
+        env:
+          CONCURRENCY: ${{ github.event.inputs.concurrency || '300' }}
+          TIMEOUT: ${{ github.event.inputs.timeout || '8' }}
+        run: python validator.py
+
+      - name: Commit results
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add results
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore: update validated proxies [skip ci]"
+            git push
+          fi
