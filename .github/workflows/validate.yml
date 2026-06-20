@@ -44,7 +44,7 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Fetch + dedupe + tag all sources
         env:
-          MAX_CANDIDATES: ${{ github.event.inputs.max_candidates || '0' }}
+          MAX_CANDIDATES: ${{ github.event.inputs.max_candidates || '8000' }}
           INCLUDE_BULK: ${{ github.event.inputs.include_bulk || 'false' }}
         run: python validator.py prepare --out candidates.jsonl
       - uses: actions/upload-artifact@v4
