@@ -1,12 +1,15 @@
 name: Validate Proxies
 
-# Runs every 10 minutes; the concurrency group guarantees a new pipeline never
-# overlaps an in-progress one (the next run waits for the current to finish).
+# Triggered externally by cron-job.org every 15 min (reliable cadence) via the
+# workflow_dispatch API. GitHub's built-in `schedule` was removed because it was
+# unreliable and caused duplicate runs. To re-add a fallback, restore a
+# `schedule:` block here.
 #
-# Pipeline:  prepare  ->  validate (16 parallel shards)  ->  merge + rank + commit
+# The concurrency group guarantees a new pipeline never overlaps an in-progress
+# one (the next run waits for the current to finish).
+#
+# Pipeline:  prepare  ->  validate (8 parallel shards)  ->  merge + rank + commit
 on:
-  schedule:
-    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       concurrency:
