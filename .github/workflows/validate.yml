@@ -38,8 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements.txt
       - name: Fetch + dedupe + tag all sources
@@ -47,7 +47,7 @@ jobs:
           MAX_CANDIDATES: ${{ github.event.inputs.max_candidates || '8000' }}
           INCLUDE_BULK: ${{ github.event.inputs.include_bulk || 'false' }}
         run: python validator.py prepare --out candidates.jsonl
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: candidates
           path: candidates.jsonl
@@ -63,11 +63,11 @@ jobs:
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v5
         with: { name: candidates }
       - name: Validate shard ${{ matrix.shard }}/8
         env:
@@ -78,7 +78,7 @@ jobs:
             --candidates candidates.jsonl \
             --shard ${{ matrix.shard }}:8 \
             --out partials/${{ matrix.shard }}.json
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: partial-${{ matrix.shard }}
           path: partials/${{ matrix.shard }}.json
@@ -91,12 +91,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4          # brings results/history.json forward
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5          # brings results/history.json forward
+      - uses: actions/setup-python@v6
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements.txt
       - name: Collect all shard partials
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: partial-*
           path: partials
