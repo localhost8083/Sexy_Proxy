@@ -70,6 +70,7 @@ and tolerant of `ip:port:country` / trailing columns.
 
 | File | Contents |
 |------|----------|
+| `master.json` | **Headline list** — fastest first, with `latency_ms`, `country`, flag emoji + `flag_url`, https, anonymity, uptime, score. |
 | `ranked.txt` | Working proxies ordered by composite **score** (best first). |
 | `ranked.json` | Full ranking detail: score, uptime, latency, ema, country, https, anonymity. |
 | `working.txt` | All working proxies, **fastest first**. |

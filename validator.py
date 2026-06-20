@@ -88,6 +88,22 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+
+def flag_emoji(country_code):
+    """ISO-3166 alpha-2 -> regional-indicator flag emoji ('US' -> '🇺🇸')."""
+    cc = (country_code or "").strip().upper()
+    if len(cc) != 2 or not cc.isalpha():
+        return ""
+    return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in cc)
+
+
+def flag_url(country_code):
+    """A hosted PNG flag (40px) for the country code, or None."""
+    cc = (country_code or "").strip().lower()
+    if len(cc) != 2 or not cc.isalpha():
+        return None
+    return f"https://flagcdn.com/w40/{cc}.png"
+
 PROXY_RE = re.compile(
     r"^(?:(?P<proto>https?|socks4a?|socks5h?)://)?"
     r"(?:(?P<auth>[^@\s/]+)@)?"
@@ -453,6 +469,24 @@ def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
 
     (RESULTS_DIR / "ranked.json").write_text(json.dumps(ranked, indent=2), encoding="utf-8")
     (RESULTS_DIR / "proxies.json").write_text(json.dumps(by_speed, indent=2), encoding="utf-8")
+
+    # master.json — the headline list: fastest first, with country + flag
+    master = [{
+        "rank": i + 1,
+        "proxy": r["proxy"],
+        "url": line(r),
+        "protocol": r["protocol"],
+        "latency_ms": r["latency_ms"],
+        "country": r["country"],
+        "country_code": r["country_code"],
+        "flag": flag_emoji(r["country_code"]),
+        "flag_url": flag_url(r["country_code"]),
+        "https": r["https"],
+        "anonymity": r["anonymity"],
+        "uptime": r["uptime"],
+        "score": r["score"],
+    } for i, r in enumerate(by_speed)]
+    (RESULTS_DIR / "master.json").write_text(json.dumps(master, indent=2), encoding="utf-8")
 
     # per-country breakdown
     by_country = {}
