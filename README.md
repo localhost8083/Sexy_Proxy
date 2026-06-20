@@ -4,13 +4,14 @@ Pulls proxies from many large public sources, **deeply validates** them in
 parallel, and publishes a **ranked** set of real, working, fastest proxies as
 `.txt` and `.json`.
 
-Built to handle very large pools — the bundled sources currently total
-**~250k+ unique candidates** per run.
+Built to handle large pools efficiently. The default **curated** source set is
+~14k high-quality candidates (fresh/validated lists) so scans finish fast; a
+much larger **bulk** tier (~250k+ raw scraped proxies) is available opt-in.
 
 ## Pipeline (3 stages, parallelized)
 
 ```
-prepare  →  validate (16 parallel shards)  →  merge + rank + commit
+prepare  →  validate (8 parallel shards)  →  merge + rank + commit
 ```
 
 1. **prepare** — fetch every source + local lists, de-duplicate, and tag each
@@ -45,11 +46,22 @@ pruned automatically.
 
 ## Sources
 
-- **`sources.json`** — the curated, protocol-tagged source list (primary).
-  Each entry is `{ "url": ..., "protocol": "http|socks4|socks5|mixed" }`.
-  Tagging lets the validator try only one protocol per proxy.
+- **`sources.json`** — the **curated, default** set: smaller, fresher /
+  pre-validated lists (~14k candidates). Protocol-tagged so each proxy is tried
+  with only one protocol. Each entry is
+  `{ "url": ..., "protocol": "http|socks4|socks5|mixed" }`.
+- **`sources_bulk.json`** — **opt-in** huge scraped lists (fyvri, MuRongPIG —
+  ~250k+ raw, mostly dead). Off by default. Enable with `--include-bulk`
+  (or `INCLUDE_BULK=true`).
 - **`sources.txt`** — optional untagged extras (tried against all protocols).
 - **`lists/*.txt`** and **`proxies.txt`** — your own local lists.
+
+### Keeping the pool reasonable
+
+- Default = curated only (fast).
+- Cap the total with `--max N` (env `MAX_CANDIDATES`). When capping, proxies
+  already **known-good from `history.json` are kept first**, then the rest fill
+  up to N — so you don't lose your proven proxies.
 
 Accepted line formats: `ip:port`, `proto://ip:port`, `user:pass@ip:port`,
 and tolerant of `ip:port:country` / trailing columns.
@@ -75,17 +87,19 @@ and tolerant of `ip:port:country` / trailing columns.
 pip install -r requirements.txt
 
 # all-in-one (prepare + validate + merge in one process)
-python validator.py
-python validator.py --loop 600          # repeat every 10 minutes
+python validator.py                          # curated set (~14k), fast
+python validator.py --include-bulk           # add the huge bulk lists
+python validator.py --max 8000               # hard-cap the candidate pool
+python validator.py --loop 600               # repeat every 10 minutes
 
 # staged (mirrors the workflow)
 python validator.py prepare  --out candidates.jsonl
 python validator.py --concurrency 500 --timeout 7 \
-        validate --candidates candidates.jsonl --shard 0:16 --out partials/0.json
+        validate --candidates candidates.jsonl --shard 0:8 --out partials/0.json
 python validator.py merge --partials "partials/*.json"
 ```
 
-Env vars: `CONCURRENCY`, `TIMEOUT`, `LOOP_SECONDS`.
+Env vars: `CONCURRENCY`, `TIMEOUT`, `LOOP_SECONDS`, `MAX_CANDIDATES`, `INCLUDE_BULK`.
 (Global flags like `--concurrency` go **before** the subcommand.)
 
 ## Schedule
@@ -105,3 +119,4 @@ so rankings improve over time).
 > Public free proxies are volatile — most candidates fail, and a proxy that
 > works now may die in minutes. That's expected; the ranking/history smooths
 > this by rewarding proxies with consistent uptime.
+

@@ -66,6 +66,7 @@ ROOT = Path(__file__).resolve().parent
 RESULTS_DIR = ROOT / "results"
 LISTS_DIR = ROOT / "lists"
 SOURCES_JSON = ROOT / "sources.json"
+SOURCES_BULK_JSON = ROOT / "sources_bulk.json"  # opt-in huge scraped lists
 SOURCES_TXT = ROOT / "sources.txt"            # optional, untagged extras
 LOCAL_PROXIES = ROOT / "proxies.txt"          # optional
 HISTORY_FILE = RESULTS_DIR / "history.json"
@@ -121,17 +122,25 @@ def normalize_proxy(line: str, default_proto: str | None = None):
     return proto, f"{m.group('host')}:{port}", m.group("auth")
 
 
-def load_sources_config():
-    """Return list of {url, protocol}. Merges sources.json + optional sources.txt."""
-    sources = []
-    if SOURCES_JSON.is_file():
+def _read_sources_json(path):
+    out = []
+    if path.is_file():
         try:
-            data = json.loads(SOURCES_JSON.read_text(encoding="utf-8"))
-            for item in data:
+            for item in json.loads(path.read_text(encoding="utf-8")):
                 if isinstance(item, dict) and item.get("url"):
-                    sources.append({"url": item["url"], "protocol": item.get("protocol")})
+                    out.append({"url": item["url"], "protocol": item.get("protocol")})
         except (json.JSONDecodeError, OSError) as exc:
-            print(f"[!] could not parse sources.json: {exc}", file=sys.stderr)
+            print(f"[!] could not parse {path.name}: {exc}", file=sys.stderr)
+    return out
+
+
+def load_sources_config(include_bulk=False):
+    """Return list of {url, protocol}. sources.json (+ optional bulk + txt extras)."""
+    sources = _read_sources_json(SOURCES_JSON)
+    if include_bulk:
+        bulk = _read_sources_json(SOURCES_BULK_JSON)
+        print(f"[*] including {len(bulk)} BULK sources (large scraped lists)")
+        sources += bulk
     if SOURCES_TXT.is_file():
         for ln in SOURCES_TXT.read_text(encoding="utf-8", errors="ignore").splitlines():
             ln = ln.strip()
@@ -178,9 +187,24 @@ async def fetch_source(session, src, sem):
     return got
 
 
-async def build_candidate_table():
-    """Fetch every source + local lists, de-duplicate by host:port."""
-    sources = load_sources_config()
+def cap_table(table, max_n, history):
+    """Reduce to max_n candidates. Keep proxies already known-good from history
+    first, then fill the rest deterministically (stable hash order)."""
+    if not max_n or len(table) <= max_n:
+        return table
+    known_hist = set((history or {}).get("proxies", {}))
+    known = [a for a in table if a in known_hist]
+    others = sorted((a for a in table if a not in known_hist),
+                    key=lambda a: zlib.crc32(a.encode()))
+    keep = (known + others)[:max_n]
+    print(f"[*] capping {len(table)} -> {len(keep)} "
+          f"(kept {min(len(known), len(keep))} known-good from history)")
+    return {a: table[a] for a in keep}
+
+
+async def build_candidate_table(include_bulk=False, max_n=0, history=None):
+    """Fetch every source + local lists, de-duplicate by host:port, optional cap."""
+    sources = load_sources_config(include_bulk=include_bulk)
     sem = asyncio.Semaphore(16)
     headers = {"User-Agent": UA}
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -195,7 +219,7 @@ async def build_candidate_table():
         if auth and not cur["auth"]:
             cur["auth"] = auth
     print(f"[*] {len(table)} unique candidates after de-duplication")
-    return table
+    return cap_table(table, max_n, history)
 
 
 def write_candidates(table, path: Path):
@@ -493,7 +517,9 @@ def finalize(working, started_at, elapsed, total_checked):
 # --------------------------------------------------------------------------- #
 
 async def mode_prepare(args):
-    table = await build_candidate_table()
+    table = await build_candidate_table(
+        include_bulk=args.include_bulk, max_n=args.max, history=load_history()
+    )
     write_candidates(table, Path(args.out))
 
 
@@ -537,7 +563,9 @@ async def mode_all_inline(args):
     """prepare + validate + merge in one process (local / --loop)."""
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     t0 = time.perf_counter()
-    table = await build_candidate_table()
+    table = await build_candidate_table(
+        include_bulk=args.include_bulk, max_n=args.max, history=load_history()
+    )
     if not table:
         print("[!] no candidates. Check sources.json / lists/.")
         finalize([], started_at, time.perf_counter() - t0, 0)
@@ -559,6 +587,11 @@ def build_parser():
     p.add_argument("--timeout", type=float, default=float(os.getenv("TIMEOUT", "7")))
     p.add_argument("--loop", type=int, default=int(os.getenv("LOOP_SECONDS", "0")),
                    help="inline mode only: repeat every N seconds")
+    p.add_argument("--max", type=int, default=int(os.getenv("MAX_CANDIDATES", "0")),
+                   help="cap total candidates (0 = no cap); history-known-good kept first")
+    p.add_argument("--include-bulk", action="store_true",
+                   default=os.getenv("INCLUDE_BULK", "").lower() in ("1", "true", "yes"),
+                   help="also load sources_bulk.json (very large scraped lists)")
     sub = p.add_subparsers(dest="mode")
 
     sp = sub.add_parser("prepare", help="fetch+dedupe+tag -> candidates.jsonl")
@@ -566,8 +599,7 @@ def build_parser():
 
     sv = sub.add_parser("validate", help="validate one shard -> partial json")
     sv.add_argument("--candidates", default="candidates.jsonl")
-    sv.add_argument("--shard", help="i:n  e.g. 0:16")
-    sv.add_argument("--max", type=int, default=0, help="cap candidates (0 = no cap)")
+    sv.add_argument("--shard", help="i:n  e.g. 0:8")
     sv.add_argument("--out", required=True)
 
     sm = sub.add_parser("merge", help="merge partials -> ranked results/")

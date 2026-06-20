@@ -15,6 +15,12 @@ on:
       timeout:
         description: "Per-request timeout (seconds)"
         default: "7"
+      max_candidates:
+        description: "Cap total candidates (0 = no cap)"
+        default: "0"
+      include_bulk:
+        description: "Also scan the huge bulk lists (true/false)"
+        default: "false"
 
 concurrency:
   group: validate-proxies
@@ -37,6 +43,9 @@ jobs:
         with: { python-version: "3.11", cache: pip }
       - run: pip install -r requirements.txt
       - name: Fetch + dedupe + tag all sources
+        env:
+          MAX_CANDIDATES: ${{ github.event.inputs.max_candidates || '0' }}
+          INCLUDE_BULK: ${{ github.event.inputs.include_bulk || 'false' }}
         run: python validator.py prepare --out candidates.jsonl
       - uses: actions/upload-artifact@v4
         with:
@@ -52,7 +61,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,14 +69,14 @@ jobs:
       - run: pip install -r requirements.txt
       - uses: actions/download-artifact@v4
         with: { name: candidates }
-      - name: Validate shard ${{ matrix.shard }}/16
+      - name: Validate shard ${{ matrix.shard }}/8
         env:
           CONCURRENCY: ${{ github.event.inputs.concurrency || '500' }}
           TIMEOUT: ${{ github.event.inputs.timeout || '7' }}
         run: |
           python validator.py validate \
             --candidates candidates.jsonl \
-            --shard ${{ matrix.shard }}:16 \
+            --shard ${{ matrix.shard }}:8 \
             --out partials/${{ matrix.shard }}.json
       - uses: actions/upload-artifact@v4
         with:
