@@ -29,8 +29,10 @@ concurrency:
   group: validate-proxies
   cancel-in-progress: false
 
+# Least privilege by default: only the merge job (which commits results) needs
+# write access. prepare/validate get read-only via this top-level default.
 permissions:
-  contents: write
+  contents: read
 
 env:
   PY: "3.11"
@@ -93,6 +95,8 @@ jobs:
     if: always()          # rank whatever shards succeeded, even if some failed
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: write     # only this job commits + pushes refreshed results/
     steps:
       - uses: actions/checkout@v5          # brings results/history.json forward
       - uses: actions/setup-python@v6
