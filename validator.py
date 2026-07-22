@@ -88,19 +88,59 @@ UA = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 
+BASE_HEADERS = {"User-Agent": UA}
+
+
+# --------------------------------------------------------------------------- #
+# Shared helpers
+# --------------------------------------------------------------------------- #
+
+def client_timeout(seconds):
+    """aiohttp total-timeout for `seconds` (single source of truth)."""
+    return aiohttp.ClientTimeout(total=seconds)
+
+
+def read_json(path: Path, default=None, *, label=None):
+    """Read + parse a JSON file. Return `default` if missing or invalid."""
+    if not path.is_file():
+        return default
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"[!] could not read {label or path}: {exc}", file=sys.stderr)
+        return default
+
+
+def write_json(path: Path, obj):
+    """Serialize `obj` as indented JSON, creating parent dirs as needed."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(obj, indent=2), encoding="utf-8")
+
+
+def read_text_lines(path: Path):
+    """Read a text file into a list of lines, tolerating bad encodings."""
+    return path.read_text(encoding="utf-8", errors="ignore").splitlines()
+
+
+def _valid_cc(country_code, *, upper):
+    """Normalize an ISO-3166 alpha-2 code, or None if it isn't one."""
+    cc = (country_code or "").strip()
+    cc = cc.upper() if upper else cc.lower()
+    return cc if len(cc) == 2 and cc.isalpha() else None
+
 
 def flag_emoji(country_code):
     """ISO-3166 alpha-2 -> regional-indicator flag emoji ('US' -> '🇺🇸')."""
-    cc = (country_code or "").strip().upper()
-    if len(cc) != 2 or not cc.isalpha():
+    cc = _valid_cc(country_code, upper=True)
+    if not cc:
         return ""
     return "".join(chr(0x1F1E6 + ord(c) - ord("A")) for c in cc)
 
 
 def flag_url(country_code):
     """A hosted PNG flag (40px) for the country code, or None."""
-    cc = (country_code or "").strip().lower()
-    if len(cc) != 2 or not cc.isalpha():
+    cc = _valid_cc(country_code, upper=False)
+    if not cc:
         return None
     return f"https://flagcdn.com/w40/{cc}.png"
 
@@ -140,13 +180,9 @@ def normalize_proxy(line: str, default_proto: str | None = None):
 
 def _read_sources_json(path):
     out = []
-    if path.is_file():
-        try:
-            for item in json.loads(path.read_text(encoding="utf-8")):
-                if isinstance(item, dict) and item.get("url"):
-                    out.append({"url": item["url"], "protocol": item.get("protocol")})
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"[!] could not parse {path.name}: {exc}", file=sys.stderr)
+    for item in read_json(path, default=[], label=path.name):
+        if isinstance(item, dict) and item.get("url"):
+            out.append({"url": item["url"], "protocol": item.get("protocol")})
     return out
 
 
@@ -158,7 +194,7 @@ def load_sources_config(include_bulk=False):
         print(f"[*] including {len(bulk)} BULK sources (large scraped lists)")
         sources += bulk
     if SOURCES_TXT.is_file():
-        for ln in SOURCES_TXT.read_text(encoding="utf-8", errors="ignore").splitlines():
+        for ln in read_text_lines(SOURCES_TXT):
             ln = ln.strip()
             if ln and not ln.startswith("#"):
                 sources.append({"url": ln, "protocol": None})
@@ -175,7 +211,7 @@ def load_local_files():
         files.append(LOCAL_PROXIES)
     for fp in files:
         try:
-            for ln in fp.read_text(encoding="utf-8", errors="ignore").splitlines():
+            for ln in read_text_lines(fp):
                 p = normalize_proxy(ln)
                 if p:
                     out.append(p)
@@ -190,7 +226,7 @@ async def fetch_source(session, src, sem):
     url, proto = src["url"], src.get("protocol")
     async with sem:
         try:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=45)) as r:
+            async with session.get(url, timeout=client_timeout(45)) as r:
                 if r.status != 200:
                     print(f"[!] {url} -> HTTP {r.status}", file=sys.stderr)
                     return []
@@ -222,8 +258,7 @@ async def build_candidate_table(include_bulk=False, max_n=0, history=None):
     """Fetch every source + local lists, de-duplicate by host:port, optional cap."""
     sources = load_sources_config(include_bulk=include_bulk)
     sem = asyncio.Semaphore(16)
-    headers = {"User-Agent": UA}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with aiohttp.ClientSession(headers=BASE_HEADERS) as session:
         batches = await asyncio.gather(*(fetch_source(session, s, sem) for s in sources))
     all_entries = [p for b in batches for p in b] + load_local_files()
 
@@ -273,10 +308,10 @@ def read_candidates(path: Path, shard=None):
 # --------------------------------------------------------------------------- #
 
 async def get_real_ip():
-    async with aiohttp.ClientSession(headers={"User-Agent": UA}) as session:
+    async with aiohttp.ClientSession(headers=BASE_HEADERS) as session:
         for url in REAL_IP_URLS:
             try:
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=15)) as r:
+                async with session.get(url, timeout=client_timeout(15)) as r:
                     data = await r.json(content_type=None)
                     ip = data.get("ip_addr") or data.get("ip")
                     if ip:
@@ -292,10 +327,10 @@ def proxy_url(proto, addr, auth):
 
 async def _request(proto, addr, auth, url, timeout, want_json=True):
     connector = ProxyConnector.from_url(proxy_url(proto, addr, auth))
-    headers = {"User-Agent": UA, "Accept": "*/*"}
+    headers = {**BASE_HEADERS, "Accept": "*/*"}
     t0 = time.perf_counter()
     async with aiohttp.ClientSession(connector=connector, headers=headers) as session:
-        async with session.get(url, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+        async with session.get(url, timeout=client_timeout(timeout)) as resp:
             if resp.status != 200:
                 raise RuntimeError(f"status {resp.status}")
             payload = await (resp.json(content_type=None) if want_json else resp.text())
@@ -382,12 +417,8 @@ def dedupe_working(results):
 
 
 def load_history():
-    if HISTORY_FILE.is_file():
-        try:
-            return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
-    return {"run_index": 0, "proxies": {}}
+    return read_json(HISTORY_FILE, default={"run_index": 0, "proxies": {}},
+                     label="history.json")
 
 
 def update_history_and_rank(working, history):
@@ -467,8 +498,8 @@ def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
     for proto in PROTOCOLS:
         dump_txt(f"{proto}.txt", [r for r in by_speed if r["protocol"] == proto])
 
-    (RESULTS_DIR / "ranked.json").write_text(json.dumps(ranked, indent=2), encoding="utf-8")
-    (RESULTS_DIR / "proxies.json").write_text(json.dumps(by_speed, indent=2), encoding="utf-8")
+    write_json(RESULTS_DIR / "ranked.json", ranked)
+    write_json(RESULTS_DIR / "proxies.json", by_speed)
 
     # master.json — the headline list: fastest first, with country + flag
     master = [{
@@ -486,7 +517,7 @@ def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
         "uptime": r["uptime"],
         "score": r["score"],
     } for i, r in enumerate(by_speed)]
-    (RESULTS_DIR / "master.json").write_text(json.dumps(master, indent=2), encoding="utf-8")
+    write_json(RESULTS_DIR / "master.json", master)
 
     # per-country breakdown
     by_country = {}
@@ -498,10 +529,8 @@ def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
         if r["latency_ms"] < c["fastest_ms"]:
             c["fastest_ms"] = r["latency_ms"]
             c["top"] = line(r)
-    (RESULTS_DIR / "by_country.json").write_text(
-        json.dumps(dict(sorted(by_country.items(), key=lambda kv: -kv[1]["count"])), indent=2),
-        encoding="utf-8",
-    )
+    write_json(RESULTS_DIR / "by_country.json",
+               dict(sorted(by_country.items(), key=lambda kv: -kv[1]["count"])))
 
     summary = {
         "generated_at": started_at,
@@ -516,7 +545,7 @@ def write_outputs(ranked, run_index, started_at, elapsed, total_checked):
         "fastest_ms": by_speed[0]["latency_ms"] if by_speed else None,
         "top_ranked": ranked[0] if ranked else None,
     }
-    (RESULTS_DIR / "summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+    write_json(RESULTS_DIR / "summary.json", summary)
     return summary
 
 
@@ -532,8 +561,7 @@ def finalize(working, started_at, elapsed, total_checked):
     history = load_history()
     ranked, run = update_history_and_rank(working, history)
     summary = write_outputs(ranked, run, started_at, elapsed, total_checked)
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(json.dumps(history, indent=2), encoding="utf-8")
+    write_json(HISTORY_FILE, history)
     print(
         f"[+] run #{run} | checked {total_checked} | working {summary['working']} | "
         f"https {summary['https_capable']} | countries {summary['countries']} | "
@@ -583,12 +611,9 @@ def mode_merge(args):
         print(f"[!] no partial files matched: {args.partials}", file=sys.stderr)
     working, total = [], 0
     for fp in files:
-        try:
-            data = json.loads(Path(fp).read_text(encoding="utf-8"))
-            working.extend(data.get("working", []))
-            total += int(data.get("checked", 0))
-        except (json.JSONDecodeError, OSError) as exc:
-            print(f"[!] bad partial {fp}: {exc}", file=sys.stderr)
+        data = read_json(Path(fp), default={}, label=f"partial {fp}")
+        working.extend(data.get("working", []))
+        total += int(data.get("checked", 0))
     print(f"[*] merging {len(files)} partials | raw working {len(working)} | checked {total}")
     finalize(working, started_at, 0.0, total)
 
