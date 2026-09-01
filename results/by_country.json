@@ -1,404 +1,440 @@
 {
-  "US": {
-    "country": "United States",
-    "count": 240,
-    "fastest_ms": 11.7,
-    "top": "http://18.208.195.229:39494"
-  },
   "GB": {
     "country": "United Kingdom",
-    "count": 221,
-    "fastest_ms": 282.5,
-    "top": "http://13.43.86.148:3128"
+    "count": 247,
+    "fastest_ms": 233.4,
+    "top": "http://81.19.210.10:80"
   },
-  "ID": {
-    "country": "Indonesia",
-    "count": 35,
-    "fastest_ms": 593.9,
-    "top": "socks4://159.65.11.156:50001"
+  "US": {
+    "country": "United States",
+    "count": 225,
+    "fastest_ms": 41.3,
+    "top": "http://3.19.54.146:1742"
   },
   "NL": {
     "country": "The Netherlands",
-    "count": 30,
-    "fastest_ms": 277.7,
-    "top": "socks4://31.220.40.59:5080"
+    "count": 32,
+    "fastest_ms": 74.6,
+    "top": "http://3.96.59.229:25780"
   },
-  "SG": {
-    "country": "Singapore",
-    "count": 20,
-    "fastest_ms": 507.2,
-    "top": "http://43.98.172.166:3128"
-  },
-  "TH": {
-    "country": "Thailand",
-    "count": 19,
-    "fastest_ms": 634.1,
-    "top": "http://157.85.108.47:3128"
-  },
-  "CN": {
-    "country": "China",
-    "count": 19,
-    "fastest_ms": 917.4,
-    "top": "http://140.246.125.194:9099"
-  },
-  "RU": {
-    "country": "Russia",
-    "count": 16,
-    "fastest_ms": 604.9,
-    "top": "http://5.129.254.129:8888"
+  "ID": {
+    "country": "Indonesia",
+    "count": 29,
+    "fastest_ms": 666.9,
+    "top": "socks4://36.89.56.127:5678"
   },
   "DE": {
     "country": "Germany",
-    "count": 15,
-    "fastest_ms": 296.5,
-    "top": "http://164.92.182.55:8080"
+    "count": 23,
+    "fastest_ms": 292.1,
+    "top": "http://130.61.112.125:443"
   },
-  "IN": {
-    "country": "India",
-    "count": 14,
-    "fastest_ms": 596.1,
-    "top": "http://3.111.49.148:59345"
-  },
-  "BR": {
-    "country": "Brazil",
-    "count": 13,
-    "fastest_ms": 670.3,
-    "top": "http://177.107.30.198:61804"
+  "RU": {
+    "country": "Russia",
+    "count": 20,
+    "fastest_ms": 492.2,
+    "top": "socks4://91.247.250.215:4145"
   },
   "FR": {
     "country": "France",
+    "count": 19,
+    "fastest_ms": 400.6,
+    "top": "http://37.59.125.131:8888"
+  },
+  "HK": {
+    "country": "Hong Kong",
+    "count": 19,
+    "fastest_ms": 663.1,
+    "top": "socks4://91.103.120.49:443"
+  },
+  "BD": {
+    "country": "Bangladesh",
+    "count": 18,
+    "fastest_ms": 811.8,
+    "top": "socks4://202.5.50.151:1080"
+  },
+  "IN": {
+    "country": "India",
+    "count": 17,
+    "fastest_ms": 667.5,
+    "top": "http://153.72.68.0:8080"
+  },
+  "BR": {
+    "country": "Brazil",
+    "count": 14,
+    "fastest_ms": 682.1,
+    "top": "socks4://189.50.138.10:5678"
+  },
+  "TH": {
+    "country": "Thailand",
+    "count": 14,
+    "fastest_ms": 693.5,
+    "top": "socks4://49.0.87.62:1080"
+  },
+  "SG": {
+    "country": "Singapore",
+    "count": 13,
+    "fastest_ms": 547.7,
+    "top": "http://159.223.41.216:9090"
+  },
+  "CN": {
+    "country": "China",
+    "count": 13,
+    "fastest_ms": 912.0,
+    "top": "http://36.111.33.167:13128"
+  },
+  "CO": {
+    "country": "Colombia",
     "count": 12,
-    "fastest_ms": 430.2,
-    "top": "http://194.163.175.167:40000"
+    "fastest_ms": 368.9,
+    "top": "socks4://190.144.224.182:44550"
+  },
+  "KH": {
+    "country": "Cambodia",
+    "count": 12,
+    "fastest_ms": 894.4,
+    "top": "socks5://202.62.52.120:1080"
   },
   "JP": {
     "country": "Japan",
     "count": 11,
-    "fastest_ms": 325.5,
-    "top": "http://52.195.147.51:22897"
-  },
-  "BD": {
-    "country": "Bangladesh",
-    "count": 11,
-    "fastest_ms": 799.0,
-    "top": "socks4://202.5.50.151:1080"
-  },
-  "CO": {
-    "country": "Colombia",
-    "count": 10,
-    "fastest_ms": 425.7,
-    "top": "http://181.78.23.187:999"
-  },
-  "KH": {
-    "country": "Cambodia",
-    "count": 10,
-    "fastest_ms": 721.5,
-    "top": "socks4://36.37.203.215:4153"
-  },
-  "AU": {
-    "country": "Australia",
-    "count": 9,
-    "fastest_ms": 279.3,
-    "top": "socks5://66.59.197.62:3128"
-  },
-  "HK": {
-    "country": "Hong Kong",
-    "count": 9,
-    "fastest_ms": 519.5,
-    "top": "http://165.154.7.156:8888"
-  },
-  "KR": {
-    "country": "South Korea",
-    "count": 9,
-    "fastest_ms": 605.9,
-    "top": "http://1.231.81.166:3128"
-  },
-  "MX": {
-    "country": "Mexico",
-    "count": 7,
-    "fastest_ms": 257.3,
-    "top": "http://189.51.168.164:999"
-  },
-  "EG": {
-    "country": "Egypt",
-    "count": 7,
-    "fastest_ms": 530.1,
-    "top": "http://41.65.103.190:8080"
-  },
-  "EC": {
-    "country": "Ecuador",
-    "count": 7,
-    "fastest_ms": 548.3,
-    "top": "http://181.39.25.196:8118"
+    "fastest_ms": 402.9,
+    "top": "http://52.195.147.51:3128"
   },
   "VN": {
     "country": "Vietnam",
-    "count": 7,
-    "fastest_ms": 669.5,
-    "top": "socks4://115.74.155.107:1080"
-  },
-  "CA": {
-    "country": "Canada",
-    "count": 6,
-    "fastest_ms": 171.6,
-    "top": "http://3.99.81.37:6270"
-  },
-  "SE": {
-    "country": "Sweden",
-    "count": 6,
-    "fastest_ms": 308.3,
-    "top": "http://13.49.41.94:1189"
-  },
-  "PL": {
-    "country": "Poland",
-    "count": 6,
-    "fastest_ms": 415.9,
-    "top": "socks4://31.42.6.125:5678"
+    "count": 10,
+    "fastest_ms": 676.8,
+    "top": "socks4://171.247.246.126:1080"
   },
   "IT": {
     "country": "Italy",
-    "count": 6,
+    "count": 9,
     "fastest_ms": 483.6,
-    "top": "http://15.161.53.177:3128"
+    "top": "http://15.161.147.63:3128"
   },
-  "ZA": {
-    "country": "South Africa",
-    "count": 5,
-    "fastest_ms": 688.1,
-    "top": "http://13.245.171.157:17238"
+  "EG": {
+    "country": "Egypt",
+    "count": 8,
+    "fastest_ms": 455.6,
+    "top": "http://84.36.35.206:1973"
   },
-  "VE": {
-    "country": "Venezuela",
-    "count": 4,
-    "fastest_ms": 354.9,
-    "top": "http://190.97.236.128:999"
+  "EC": {
+    "country": "Ecuador",
+    "count": 8,
+    "fastest_ms": 487.2,
+    "top": "http://181.39.25.196:8118"
+  },
+  "MX": {
+    "country": "Mexico",
+    "count": 6,
+    "fastest_ms": 206.6,
+    "top": "http://45.174.168.36:999"
+  },
+  "KR": {
+    "country": "South Korea",
+    "count": 6,
+    "fastest_ms": 590.5,
+    "top": "http://13.125.44.24:80"
   },
   "AR": {
     "country": "Argentina",
-    "count": 4,
-    "fastest_ms": 836.7,
+    "count": 6,
+    "fastest_ms": 743.5,
     "top": "http://179.41.11.138:8080"
+  },
+  "CA": {
+    "country": "Canada",
+    "count": 5,
+    "fastest_ms": 71.5,
+    "top": "http://35.183.29.62:16504"
+  },
+  "IE": {
+    "country": "Ireland",
+    "count": 5,
+    "fastest_ms": 217.6,
+    "top": "http://34.245.10.112:24232"
+  },
+  "VE": {
+    "country": "Venezuela",
+    "count": 5,
+    "fastest_ms": 361.1,
+    "top": "http://190.97.236.128:999"
   },
   "IR": {
     "country": "Iran",
-    "count": 3,
-    "fastest_ms": 791.2,
-    "top": "socks4://194.31.108.109:2080"
+    "count": 5,
+    "fastest_ms": 726.9,
+    "top": "socks4://81.91.157.133:5678"
   },
-  "NP": {
-    "country": "Nepal",
+  "UA": {
+    "country": "Ukraine",
+    "count": 4,
+    "fastest_ms": 355.7,
+    "top": "socks5://93.123.118.15:1080"
+  },
+  "FI": {
+    "country": "Finland",
+    "count": 4,
+    "fastest_ms": 437.5,
+    "top": "http://93.123.30.53:3128"
+  },
+  "TR": {
+    "country": "Turkey",
+    "count": 4,
+    "fastest_ms": 514.2,
+    "top": "http://95.3.69.222:8080"
+  },
+  "PH": {
+    "country": "Philippines",
+    "count": 4,
+    "fastest_ms": 860.8,
+    "top": "http://112.203.214.112:8082"
+  },
+  "AL": {
+    "country": "Albania",
     "count": 3,
-    "fastest_ms": 1014.7,
-    "top": "socks4://116.90.234.106:1080"
+    "fastest_ms": 385.9,
+    "top": "socks4://78.159.131.108:1082"
+  },
+  "PL": {
+    "country": "Poland",
+    "count": 3,
+    "fastest_ms": 397.2,
+    "top": "socks4://31.42.6.125:5678"
+  },
+  "SE": {
+    "country": "Sweden",
+    "count": 3,
+    "fastest_ms": 462.5,
+    "top": "socks4://79.76.59.115:1080"
+  },
+  "ES": {
+    "country": "Spain",
+    "count": 3,
+    "fastest_ms": 523.3,
+    "top": "socks5://185.214.101.27:1080"
   },
   "MY": {
     "country": "Malaysia",
     "count": 3,
-    "fastest_ms": 1122.1,
-    "top": "socks4://111.119.162.248:10936"
+    "fastest_ms": 1242.5,
+    "top": "socks5://47.250.211.53:1080"
   },
-  "ES": {
-    "country": "Spain",
-    "count": 2,
-    "fastest_ms": 350.7,
-    "top": "socks5://185.214.101.27:1080"
+  "DO": {
+    "country": "Dominican Republic",
+    "count": 3,
+    "fastest_ms": 1454.7,
+    "top": "http://38.188.247.12:999"
+  },
+  "KE": {
+    "country": "Kenya",
+    "count": 3,
+    "fastest_ms": 1697.1,
+    "top": "http://197.248.16.109:8080"
   },
   "AT": {
     "country": "Austria",
     "count": 2,
-    "fastest_ms": 391.7,
+    "fastest_ms": 384.7,
     "top": "http://193.233.232.49:3131"
   },
-  "AL": {
-    "country": "Albania",
+  "EE": {
+    "country": "Estonia",
     "count": 2,
-    "fastest_ms": 392.1,
-    "top": "socks4://78.159.131.108:1082"
-  },
-  "FI": {
-    "country": "Finland",
-    "count": 2,
-    "fastest_ms": 539.3,
-    "top": "socks4://31.76.31.241:1080"
-  },
-  "TR": {
-    "country": "Turkey",
-    "count": 2,
-    "fastest_ms": 539.8,
-    "top": "http://95.3.69.222:8080"
-  },
-  "BE": {
-    "country": "Belgium",
-    "count": 2,
-    "fastest_ms": 630.3,
-    "top": "http://138.16.226.113:1081"
-  },
-  "KZ": {
-    "country": "Kazakhstan",
-    "count": 2,
-    "fastest_ms": 798.9,
-    "top": "http://37.221.202.27:8080"
+    "fastest_ms": 499.0,
+    "top": "socks5://5.45.119.70:1080"
   },
   "CL": {
     "country": "Chile",
     "count": 2,
-    "fastest_ms": 1559.6,
-    "top": "http://45.161.112.227:999"
-  },
-  "UA": {
-    "country": "Ukraine",
-    "count": 2,
-    "fastest_ms": 1679.3,
-    "top": "socks4://31.43.33.56:4153"
-  },
-  "PH": {
-    "country": "Philippines",
-    "count": 2,
-    "fastest_ms": 1984.5,
-    "top": "http://111.119.162.248:10920"
-  },
-  "AE": {
-    "country": "United Arab Emirates",
-    "count": 2,
-    "fastest_ms": 2202.8,
-    "top": "socks4://111.119.162.248:10901"
-  },
-  "CH": {
-    "country": "Switzerland",
-    "count": 2,
-    "fastest_ms": 3459.4,
-    "top": "http://45.95.232.35:3128"
-  },
-  "HN": {
-    "country": "Honduras",
-    "count": 1,
-    "fastest_ms": 311.8,
-    "top": "socks4://181.115.74.172:5678"
-  },
-  "IE": {
-    "country": "Ireland",
-    "count": 1,
-    "fastest_ms": 527.0,
-    "top": "socks5://152.53.194.105:1080"
-  },
-  "CY": {
-    "country": "Cyprus",
-    "count": 1,
-    "fastest_ms": 652.8,
-    "top": "socks4://213.7.196.26:4153"
-  },
-  "TW": {
-    "country": "Taiwan",
-    "count": 1,
-    "fastest_ms": 669.8,
-    "top": "socks4://125.228.94.199:4145"
-  },
-  "IQ": {
-    "country": "Iraq",
-    "count": 1,
-    "fastest_ms": 741.1,
-    "top": "socks4://62.201.212.198:4673"
-  },
-  "SA": {
-    "country": "Saudi Arabia",
-    "count": 1,
-    "fastest_ms": 859.4,
-    "top": "socks5://49.13.22.249:10811"
-  },
-  "CI": {
-    "country": "Ivory Coast",
-    "count": 1,
-    "fastest_ms": 917.2,
-    "top": "socks4://160.155.90.26:1080"
-  },
-  "SK": {
-    "country": "Slovakia",
-    "count": 1,
-    "fastest_ms": 1072.7,
-    "top": "http://217.160.249.182:8083"
-  },
-  "LT": {
-    "country": "Lithuania",
-    "count": 1,
-    "fastest_ms": 1474.0,
-    "top": "socks4://213.197.136.218:5678"
-  },
-  "MN": {
-    "country": "Mongolia",
-    "count": 1,
-    "fastest_ms": 1616.7,
-    "top": "socks4://49.0.156.20:32000"
+    "fastest_ms": 589.5,
+    "top": "http://167.249.30.17:8080"
   },
   "BG": {
     "country": "Bulgaria",
-    "count": 1,
-    "fastest_ms": 1739.7,
-    "top": "socks4://212.5.132.74:5678"
+    "count": 2,
+    "fastest_ms": 790.6,
+    "top": "socks4://213.149.154.213:5678"
   },
-  "CM": {
-    "country": "Cameroon",
-    "count": 1,
-    "fastest_ms": 1826.8,
-    "top": "socks4://41.216.232.213:4153"
+  "NP": {
+    "country": "Nepal",
+    "count": 2,
+    "fastest_ms": 938.0,
+    "top": "socks4://202.79.35.143:4153"
   },
-  "UY": {
-    "country": "Uruguay",
-    "count": 1,
-    "fastest_ms": 1976.0,
-    "top": "socks4://200.125.40.38:5678"
+  "AM": {
+    "country": "Armenia",
+    "count": 2,
+    "fastest_ms": 1043.0,
+    "top": "socks4://212.34.230.102:4153"
   },
-  "PK": {
-    "country": "Pakistan",
-    "count": 1,
-    "fastest_ms": 2215.5,
-    "top": "socks4://103.115.198.39:5678"
+  "RS": {
+    "country": "Serbia",
+    "count": 2,
+    "fastest_ms": 1130.2,
+    "top": "socks4://95.140.118.34:1080"
   },
-  "NG": {
-    "country": "Nigeria",
-    "count": 1,
-    "fastest_ms": 2645.5,
-    "top": "socks5://102.69.146.59:7080"
+  "CZ": {
+    "country": "Czechia",
+    "count": 2,
+    "fastest_ms": 1618.0,
+    "top": "socks4://81.162.195.35:4153"
   },
-  "PE": {
-    "country": "Peru",
-    "count": 1,
-    "fastest_ms": 2674.4,
-    "top": "socks4://190.12.95.170:37209"
+  "ZA": {
+    "country": "South Africa",
+    "count": 2,
+    "fastest_ms": 2036.5,
+    "top": "socks5://102.36.127.231:1080"
   },
-  "GH": {
-    "country": "Ghana",
-    "count": 1,
-    "fastest_ms": 3048.9,
-    "top": "socks4://196.29.231.1:4145"
+  "RO": {
+    "country": "Romania",
+    "count": 2,
+    "fastest_ms": 3645.9,
+    "top": "socks4://81.12.157.98:5678"
+  },
+  "AU": {
+    "country": "Australia",
+    "count": 2,
+    "fastest_ms": 4172.7,
+    "top": "http://185.204.170.179:1150"
   },
   "SY": {
     "country": "Syria",
     "count": 1,
-    "fastest_ms": 3449.0,
-    "top": "http://78.155.65.204:8080"
+    "fastest_ms": 537.5,
+    "top": "socks4://89.43.135.181:1080"
+  },
+  "BO": {
+    "country": "Bolivia",
+    "count": 1,
+    "fastest_ms": 684.6,
+    "top": "socks4://200.105.192.6:5678"
+  },
+  "IQ": {
+    "country": "Iraq",
+    "count": 1,
+    "fastest_ms": 686.0,
+    "top": "socks4://62.201.212.198:4673"
+  },
+  "BE": {
+    "country": "Belgium",
+    "count": 1,
+    "fastest_ms": 720.9,
+    "top": "http://138.16.226.113:1081"
+  },
+  "KG": {
+    "country": "Kyrgyzstan",
+    "count": 1,
+    "fastest_ms": 731.1,
+    "top": "http://77.235.24.145:3129"
+  },
+  "NG": {
+    "country": "Nigeria",
+    "count": 1,
+    "fastest_ms": 853.2,
+    "top": "socks4://41.75.84.86:4153"
+  },
+  "MA": {
+    "country": "Morocco",
+    "count": 1,
+    "fastest_ms": 941.6,
+    "top": "http://196.64.105.48:1230"
+  },
+  "NI": {
+    "country": "Nicaragua",
+    "count": 1,
+    "fastest_ms": 959.6,
+    "top": "socks5://5.75.133.113:10809"
+  },
+  "KZ": {
+    "country": "Kazakhstan",
+    "count": 1,
+    "fastest_ms": 1059.7,
+    "top": "http://94.131.92.155:3128"
+  },
+  "CH": {
+    "country": "Switzerland",
+    "count": 1,
+    "fastest_ms": 1558.5,
+    "top": "socks4://45.95.232.35:1080"
+  },
+  "UZ": {
+    "country": "Uzbekistan",
+    "count": 1,
+    "fastest_ms": 1582.0,
+    "top": "http://195.158.8.123:3128"
+  },
+  "PE": {
+    "country": "Peru",
+    "count": 1,
+    "fastest_ms": 1731.6,
+    "top": "socks4://177.91.255.35:5678"
+  },
+  "PY": {
+    "country": "Paraguay",
+    "count": 1,
+    "fastest_ms": 1849.7,
+    "top": "socks4://179.189.219.98:4145"
+  },
+  "SK": {
+    "country": "Slovakia",
+    "count": 1,
+    "fastest_ms": 2254.0,
+    "top": "http://217.160.249.182:8083"
+  },
+  "XK": {
+    "country": "Kosovo",
+    "count": 1,
+    "fastest_ms": 2329.4,
+    "top": "http://185.188.217.166:8080"
+  },
+  "MW": {
+    "country": "Malawi",
+    "count": 1,
+    "fastest_ms": 2444.4,
+    "top": "socks4://41.70.106.1:5678"
+  },
+  "UY": {
+    "country": "Uruguay",
+    "count": 1,
+    "fastest_ms": 2815.4,
+    "top": "socks4://179.27.86.36:4153"
+  },
+  "GT": {
+    "country": "Guatemala",
+    "count": 1,
+    "fastest_ms": 3416.4,
+    "top": "http://148.230.27.77:999"
+  },
+  "PA": {
+    "country": "Panama",
+    "count": 1,
+    "fastest_ms": 3720.7,
+    "top": "socks4://200.108.50.254:4145"
   },
   "NZ": {
     "country": "New Zealand",
     "count": 1,
-    "fastest_ms": 4273.8,
+    "fastest_ms": 3955.1,
     "top": "http://217.160.249.182:8082"
   },
-  "KE": {
-    "country": "Kenya",
+  "LY": {
+    "country": "Libya",
     "count": 1,
-    "fastest_ms": 4448.3,
-    "top": "http://102.216.116.234:8080"
+    "fastest_ms": 3971.5,
+    "top": "http://62.68.48.22:8080"
   },
-  "DO": {
-    "country": "Dominican Republic",
+  "PK": {
+    "country": "Pakistan",
     "count": 1,
-    "fastest_ms": 4728.2,
-    "top": "http://38.75.82.220:999"
+    "fastest_ms": 4648.1,
+    "top": "socks5://72.255.38.180:1080"
   },
-  "GR": {
-    "country": "Greece",
+  "BW": {
+    "country": "Botswana",
     "count": 1,
-    "fastest_ms": 5682.7,
-    "top": "http://149.210.1.78:18080"
+    "fastest_ms": 6266.4,
+    "top": "socks4://83.143.29.161:1080"
   }
 }
