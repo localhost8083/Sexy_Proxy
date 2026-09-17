@@ -273,6 +273,7 @@ def read_candidates(path: Path, shard=None):
 # --------------------------------------------------------------------------- #
 
 async def get_real_ip():
+    errors = []
     async with aiohttp.ClientSession(headers={"User-Agent": UA}) as session:
         for url in REAL_IP_URLS:
             try:
@@ -281,8 +282,15 @@ async def get_real_ip():
                     ip = data.get("ip_addr") or data.get("ip")
                     if ip:
                         return ip.strip()
-            except Exception:  # noqa: BLE001
-                continue
+                    errors.append(f"{url}: no ip field in response")
+            except Exception as exc:  # noqa: BLE001
+                errors.append(f"{url}: {exc}")
+    print(
+        "[!] could not determine our real IP (" + "; ".join(errors) + ") -- "
+        "transparent-proxy detection will be unreliable (proxies may be "
+        "misclassified as anonymous/elite)",
+        file=sys.stderr,
+    )
     return None
 
 
@@ -385,8 +393,12 @@ def load_history():
     if HISTORY_FILE.is_file():
         try:
             return json.loads(HISTORY_FILE.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            pass
+        except (json.JSONDecodeError, OSError) as exc:
+            print(
+                f"[!] could not read history {HISTORY_FILE.name}: {exc} -- starting "
+                f"fresh (rolling uptime/run-count stats will reset)",
+                file=sys.stderr,
+            )
     return {"run_index": 0, "proxies": {}}
 
 
@@ -554,6 +566,14 @@ async def mode_prepare(args):
     table = await build_candidate_table(
         include_bulk=args.include_bulk, max_n=args.max, history=load_history()
     )
+    if not table:
+        print(
+            "[!] no candidates gathered from any source -- check sources.json and "
+            "network connectivity. Refusing to write an empty candidates file "
+            "(would wipe the published lists downstream).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     write_candidates(table, Path(args.out))
 
 
@@ -580,16 +600,37 @@ def mode_merge(args):
     started_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     files = sorted(globmod.glob(args.partials))
     if not files:
-        print(f"[!] no partial files matched: {args.partials}", file=sys.stderr)
+        print(
+            f"[!] no partial files matched {args.partials!r} -- refusing to overwrite "
+            f"existing results with an empty set (all validate shards likely failed)",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
     working, total = [], 0
+    read_ok, read_failed = 0, 0
     for fp in files:
         try:
             data = json.loads(Path(fp).read_text(encoding="utf-8"))
-            working.extend(data.get("working", []))
-            total += int(data.get("checked", 0))
         except (json.JSONDecodeError, OSError) as exc:
             print(f"[!] bad partial {fp}: {exc}", file=sys.stderr)
-    print(f"[*] merging {len(files)} partials | raw working {len(working)} | checked {total}")
+            read_failed += 1
+            continue
+        working.extend(data.get("working", []))
+        total += int(data.get("checked", 0))
+        read_ok += 1
+    if read_ok == 0:
+        print(
+            f"[!] all {read_failed} partial file(s) were unreadable -- refusing to "
+            f"overwrite existing results with an empty set",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if read_failed:
+        print(
+            f"[!] proceeding with {read_ok} good partial(s); {read_failed} unreadable",
+            file=sys.stderr,
+        )
+    print(f"[*] merging {read_ok} partials | raw working {len(working)} | checked {total}")
     finalize(working, started_at, 0.0, total)
 
 
