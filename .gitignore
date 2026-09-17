@@ -7,6 +7,12 @@ env/
 .idea/
 .vscode/
 
+# Test / coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+coverage.xml
+
 # Local-only scratch proxy input (uncomment if you don't want to track it)
 # proxies.txt
 
