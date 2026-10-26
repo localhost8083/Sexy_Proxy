@@ -1,35 +1,36 @@
 {
-  "generated_at": "2026-10-26T01:18:29+00:00",
-  "run_index": 12142,
+  "generated_at": "2026-10-26T01:33:47+00:00",
+  "run_index": 12143,
   "elapsed_seconds": 0.0,
-  "candidates_checked": 89928,
-  "working": 1534,
-  "https_capable": 594,
+  "candidates_checked": 90464,
+  "working": 1212,
+  "https_capable": 331,
   "by_protocol": {
-    "http": 495,
-    "socks4": 347,
-    "socks5": 692
+    "http": 316,
+    "socks4": 312,
+    "socks5": 584
   },
   "by_anonymity": {
-    "elite": 1201,
-    "unknown": 333
+    "elite": 934,
+    "unknown": 277,
+    "anonymous": 1
   },
-  "countries": 76,
-  "fastest_ms": 14.4,
+  "countries": 67,
+  "fastest_ms": 14.7,
   "top_ranked": {
-    "proxy": "31.44.5.192:1081",
-    "protocol": "socks4",
-    "latency_ms": 122.6,
+    "proxy": "69.55.49.177:38182",
+    "protocol": "socks5",
+    "latency_ms": 49.3,
     "country": "United States",
     "country_code": "US",
-    "exit_ip": "31.44.5.192",
+    "exit_ip": "69.55.49.177",
     "https": true,
     "anonymity": "elite",
-    "checked_at": "2026-10-26T01:16:25+00:00",
-    "ema_latency_ms": 314.8,
-    "uptime": 1.0,
-    "working_count": 2,
-    "runs_observed": 2,
-    "score": 99.31
+    "checked_at": "2026-10-26T01:31:18+00:00",
+    "ema_latency_ms": 196.2,
+    "uptime": 0.998,
+    "working_count": 532,
+    "runs_observed": 533,
+    "score": 99.7
   }
 }
